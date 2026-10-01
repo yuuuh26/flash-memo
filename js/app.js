@@ -1,10 +1,12 @@
 import {openDB,readSnapshot,write} from './db.js';
 import {uid,now,blank,hasContent,title,date,mergeMemos,History} from './model.js';
 import {exportData,decodeBackup,combineBackup,download} from './backup.js';
+import {appStorageUsage,formatBytes} from './storage.js';
 const $=id=>document.getElementById(id);
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let data,config,counter,current,history,view='write',revision=0,timer,queue=Promise.resolve(),writer=false,selecting=false,selected=new Set(),tagSelection=new Set(),filters=[],urls=[],pendingExport=null,installEvent,attachmentBusy=false;
 let ready=false;
+let storageRefresh=0,storageAbort;
 const toast=text=>{$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,2600);};
 function failure(error){$('status').textContent='保存失敗 · 入力はこの画面に残っています';$('status').className='error';toast(error?.name==='QuotaExceededError'?'保存容量が不足しています。バックアップ後に不要なデータを整理してください。':error.message||'保存に失敗しました。');}
 function enqueue(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
@@ -50,7 +52,7 @@ function renderImages(){
 }
 function showImage(image){const url=URL.createObjectURL(image.blob);dialog('<h2>添付画像</h2><img alt="添付画像">');$('dialogContent').querySelector('img').src=url;$('dialog').addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});}
 function renderEditor(){ $('body').value=current.body;$('editorLabel').textContent=data.memos.some(m=>m.id===current.id)?'EDIT MEMO':'NEW MEMO';renderTags();renderImages();resized();historyButtons();}
-async function changeView(nextView){await flush();view=nextView;for(const el of document.querySelectorAll('.view'))el.hidden=el.id!==view;for(const el of document.querySelectorAll('nav button'))el.classList.toggle('active',el.dataset.view===view);if(view==='list')renderList();if(view==='settings'){renderSettings();await storageInfo();}if(view==='write'){resized();$('body').focus({preventScroll:true});}}
+async function changeView(nextView){if(nextView!=='settings'){storageAbort?.abort();storageRefresh++;}await flush();view=nextView;for(const el of document.querySelectorAll('.view'))el.hidden=el.id!==view;for(const el of document.querySelectorAll('nav button'))el.classList.toggle('active',el.dataset.view===view);if(view==='list')renderList();if(view==='settings')renderSettings();if(view==='write'){resized();$('body').focus({preventScroll:true});}}
 function dialog(html){$('dialogContent').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();}
 function closeDialog(){$('dialog').close();if(view==='write')$('body').focus({preventScroll:true});}
 function confirmDialog(heading,text,action){dialog(`<h2>${escape(heading)}</h2><p>${escape(text)}</p><button id="confirmAction" class="primary">実行する</button>`);$('confirmAction').onclick=async()=>{const button=$('confirmAction');button.disabled=true;await action();closeDialog();};}
@@ -96,6 +98,7 @@ function renderSettings(){
   $('trashList').replaceChildren();const trash=data.memos.filter(m=>m.deletedAt).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt));if(!trash.length)$('trashList').innerHTML='<p class="muted">ゴミ箱は空です</p>';
   for(const m of trash){const row=document.createElement('div');row.className='trash-row';row.innerHTML=`<p>${escape(title(m))}<br><span class="muted">削除 ${date(m.deletedAt)}</span></p>`;const restore=document.createElement('button');restore.textContent='復元';restore.onclick=guard(async()=>{await enqueue(()=>write({memos:[{...m,deletedAt:null,updatedAt:now()}]}));await syncData();renderSettings();toast('復元しました');});const remove=document.createElement('button');remove.textContent='完全削除';remove.className='danger';remove.onclick=guard(()=>confirmDialog('完全削除しますか？','このメモと添付画像は復元できません。',guard(async()=>{await enqueue(()=>write({remove:{memos:[m.id],attachments:m.attachmentIds}}));await syncData();renderSettings();toast('完全削除しました');})));row.append(restore,remove);$('trashList').append(row);}
   $('publicUrl').value='https://yuuuh26.github.io/flash-memo/';
+  if(view==='settings')void storageInfo();
 }
 async function updateTagObjects(tags){await flush();await enqueue(()=>write({tags}));await syncData();renderSettings();renderTags();}
 function renameTag(tag){dialog('<h2>タグの名前変更</h2><input id="tagName" aria-label="タグ名"><div class="dialog-actions"><button id="saveTagName" class="primary">変更</button></div>');$('tagName').value=tag.name;$('saveTagName').onclick=guard(async()=>{const name=$('tagName').value.trim();if(!name)throw new Error('タグ名を入力してください。');if(data.tags.some(t=>t.id!==tag.id&&t.name===name))throw new Error('同じ名前のタグがあります。');await updateTagObjects([{...tag,name,updatedAt:now()}]);closeDialog();});}
@@ -128,10 +131,30 @@ async function importFile(event){const file=event.target.files[0];event.target.v
   $('commitImport').onclick=guard(async()=>{const button=$('commitImport');button.disabled=true;try{const existing=await canonicalSnapshot();const result=mode==='replace'?incoming:combineBackup(existing,incoming);await enqueue(()=>write(result,mode==='replace'));await syncData();const draft=data.memos.find(m=>m.id===config.activeDraftId&&!m.deletedAt);current=draft?structuredClone(draft):blank(config.selectedTagIds);config.activeDraftId=current.id;revision++;history.reset(stateOf(current));selected.clear();tagSelection.clear();filters=[];pendingExport=null;$('exportResult').textContent='';$('reminder').hidden=true;renderEditor();renderSettings();closeDialog();$('importResult').textContent=`インポート完了 · 現在のメモ：${data.memos.length}件 / タグ：${data.tags.length}件 / 画像：${data.attachments.length}件`;toast('インポート完了');}finally{button.disabled=false;}});
 }
 async function storageInfo(){
-  if(navigator.storage?.persisted){$('persistence').textContent='永続ストレージ：'+(await navigator.storage.persisted()?'有効':'未許可');}else $('persistence').textContent='永続ストレージ：非対応';
-  const estimate=await navigator.storage?.estimate?.();if(estimate)$('storage').textContent=`使用容量：約${((estimate.usage||0)/1048576).toFixed(1)} MB / 利用可能容量：約${((estimate.quota||0)/1048576).toFixed(0)} MB`;
+  const refresh=++storageRefresh;
+  storageAbort?.abort();storageAbort=new AbortController();const signal=storageAbort.signal;
+  $('appStorage').textContent='このアプリの使用容量（概算）：計算中…';
+  $('appStorageDetails').textContent='';
+  $('hostStorage').textContent='同じホスト全体の使用容量（ブラウザ推計）：取得中…';
+  $('hostStorageScope').textContent=`この端末・このブラウザの ${window.location.origin} 全体。他のアプリのIndexedDBやオフライン用データも含みます。`;
+  const [app,host,persisted]=await Promise.allSettled([
+    appStorageUsage(globalThis.caches,new URL('../',import.meta.url).href,signal),
+    Promise.resolve().then(()=>navigator.storage?.estimate?.()),
+    Promise.resolve().then(()=>navigator.storage?.persisted?.())
+  ]);
+  if(refresh!==storageRefresh)return;
+  $('persistence').textContent='永続ストレージ：'+(persisted.status==='rejected'?'未確認':persisted.value===undefined?'非対応':persisted.value?'有効':'未許可');
+  if(app.status==='fulfilled'){
+    const {database,cache,total}=app.value;
+    $('appStorage').textContent=`このアプリの使用容量（概算）：${total===null?'一部取得できません':'約'+formatBytes(total)}`;
+    const part=value=>value===null?'取得できません':'約'+formatBytes(value);
+    $('appStorageDetails').textContent=`保存データ：${part(database)} / オフライン用ファイル：${part(cache)}`;
+  }else $('appStorage').textContent='このアプリの使用容量（概算）：取得できません';
+  const usage=host.status==='fulfilled'?host.value?.usage:undefined;
+  $('hostStorage').textContent=`同じホスト全体の使用容量（ブラウザ推計）：${Number.isFinite(usage)&&usage>=0?'約'+formatBytes(usage):'取得できません'}`;
 }
 function bind(){
+  $('refreshStorage').onclick=()=>storageInfo();
   $('body').oninput=()=>{if(!writer)return;current.body=$('body').value;resized();markChanged();};
   $('body').onblur=()=>{if(writer)flush().catch(failure);};
   for(const button of document.querySelectorAll('nav button'))button.onclick=guard(()=>changeView(button.dataset.view));

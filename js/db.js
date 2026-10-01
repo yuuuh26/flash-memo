@@ -22,6 +22,25 @@ export function readSnapshot(){
     tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(tx.error);
   });
 }
+// Read only this app's records without accumulating another full snapshot.
+export function measureStoredData(sizeOf,signal){
+  return new Promise((resolve,reject)=>{
+    if(signal?.aborted){reject(new DOMException('計測を中止しました。','AbortError'));return;}
+    const tx=connection.transaction(STORES,'readonly');let bytes=0,error;
+    const abort=()=>{error=new DOMException('計測を中止しました。','AbortError');tx.abort();};
+    signal?.addEventListener('abort',abort,{once:true});
+    for(const name of STORES){
+      const request=tx.objectStore(name).openCursor();
+      request.onsuccess=()=>{
+        const cursor=request.result;if(!cursor)return;
+        try{bytes+=sizeOf(cursor.value);cursor.continue();}
+        catch(cause){error=cause;tx.abort();}
+      };
+    }
+    tx.oncomplete=()=>{signal?.removeEventListener('abort',abort);resolve(bytes);};
+    tx.onabort=()=>{signal?.removeEventListener('abort',abort);reject(error||tx.error);};
+  });
+}
 // All writes resolve only on transaction completion. No await inside the transaction.
 export function write(changes,replace=false){
   return new Promise((resolve,reject)=>{

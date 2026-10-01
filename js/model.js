@@ -1,4 +1,4 @@
-export const VERSION='1.0.0';
+export const VERSION='1.0.1';
 export const uid=(prefix)=>`${prefix}_${crypto.randomUUID()}`;
 export const now=()=>new Date().toISOString();
 export const blank=(tagIds=[])=>({id:uid('memo'),body:'',createdAt:now(),updatedAt:now(),tagIds:[...tagIds],attachmentIds:[],mergedFromIds:[],deletedAt:null});

@@ -1,10 +1,10 @@
 {
   "name": "flash-memo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/run.mjs && node tests/recovery.mjs && node tests/offline.mjs"
+    "test": "node tests/run.mjs && node tests/recovery.mjs && node tests/offline.mjs && node tests/storage.mjs"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.5",

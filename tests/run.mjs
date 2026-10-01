@@ -11,6 +11,9 @@ w.scrollTo=()=>{};w.HTMLDialogElement.prototype.showModal=function(){this.open=t
 globalThis.FileReader=class{readAsDataURL(blob){blob.arrayBuffer().then(buffer=>{this.result=`data:${blob.type};base64,${Buffer.from(buffer).toString('base64')}`;this.onload();}).catch(error=>{this.error=error;this.onerror();});}};
 w.HTMLAnchorElement.prototype.click=function(){downloads.push(this.download);};const downloads=[];
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async value=>{copied=value;}}});let copied;
+let storageFailure=false;
+Object.defineProperty(navigator,'storage',{value:{persisted:async()=>true,estimate:async()=>{if(storageFailure)throw new Error('unavailable');return {usage:750000000,quota:10737418240};}}});
+globalThis.caches={keys:async()=>{if(storageFailure)throw new Error('unavailable');return [];},match:async()=>undefined};
 const $=id=>document.getElementById(id);const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,label='state'){for(let i=0;i<500;i++){if(await fn())return;await sleep(10);}throw new Error('Timeout: '+label+' | '+$('status').textContent+' | '+$('toast').textContent);}
 const report=[];const passed=name=>{report.push(name);console.log('PASS',name);};
@@ -23,7 +26,18 @@ async function next(){const id=$('body').value;$('next').click();await wait(()=>
 async function addTag(name){$('newTag').value=name;$('newTagForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>$('newTag').value==='','add tag');}
 passed('起動・IndexedDBストア作成');
 await next();assert.equal((await snapshot()).memos.length,0);passed('空メモの連続作成防止');
-await view('settings');await addTag('仕事');await addTag('アイデア');await view('write');
+await view('settings');
+await wait(()=>$('hostStorage').textContent.includes('750 MB')&&$('appStorage').textContent.includes('約'));
+assert.match($('hostStorageScope').textContent,/https:\/\/yuuuh26.github.io/);
+assert.match($('appStorageDetails').textContent,/オフライン用ファイル：約0 B/);
+assert.doesNotMatch($('settings').textContent,/利用可能容量|10240/);
+const storedBeforeFailure=await snapshot();const statusBeforeFailure=$('status').textContent;
+storageFailure=true;$('refreshStorage').click();
+await wait(()=>$('hostStorage').textContent.includes('取得できません')&&$('appStorage').textContent.includes('一部取得できません'));
+assert.equal($('status').textContent,statusBeforeFailure);assert.deepEqual(await snapshot(),storedBeforeFailure);
+storageFailure=false;$('refreshStorage').click();await wait(()=>$('hostStorage').textContent.includes('750 MB'));
+passed('アプリ単体とホスト全体の容量表示・取得失敗でも保存状態とデータを保持');
+await addTag('仕事');await addTag('アイデア');await view('write');
 $('quickTags').querySelector('button').click();type('最初の走り書き');await save();let s=await snapshot();assert.equal(s.memos[0].body,'最初の走り書き');assert.equal(s.memos[0].tagIds.length,1);passed('400ms自動保存・成功状態・固定タグID');
 $('quickTags').querySelectorAll('button')[1].click();assert.equal($('body').value,'最初の走り書き');await save();assert.equal((await snapshot()).memos[0].tagIds.length,2);passed('タグ変更時の本文保持・複数タグ');
 await next();assert.equal(document.activeElement,$('body'));assert.equal($('quickTags').querySelectorAll('.selected').length,2);type('二つ目');await save();await next();passed('次のメモ・フォーカス・クイックタグ引き継ぎ');
