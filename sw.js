@@ -1,4 +1,4 @@
-const CACHE='flash-memo-shell-v1.0.0';
+const CACHE='flash-memo-shell-v1.0.0-r2';
 const ROOT=new URL('./',self.location).href;
 const ASSETS=['./','./index.html','./style.css','./js/app.js','./js/db.js','./js/model.js','./js/backup.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-maskable-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS.map(path=>new URL(path,ROOT).href)))));

@@ -24,7 +24,7 @@ export function validateBackup(data){
   }
   const config=data.settings.find(s=>s.id==='config');const count=data.backupState.find(s=>s.id==='counter');
   if(!config||!stringArray(config.selectedTagIds)||config.selectedTagIds.some(id=>!tags.has(id))||!(config.activeDraftId===null||memos.has(config.activeDraftId)))fail();
-  if(!count||!Number.isSafeInteger(count.createdCount)||count.createdCount<0||!Number.isSafeInteger(count.confirmedCount)||count.confirmedCount<0||count.confirmedCount>count.createdCount||!Number.isSafeInteger(count.remindedCount)||count.remindedCount<0||count.remindedCount>count.createdCount)fail();
+  if(!count||!Number.isSafeInteger(count.createdCount)||count.createdCount<0||!Number.isSafeInteger(count.confirmedCount)||count.confirmedCount<0||count.confirmedCount>count.createdCount||!Number.isSafeInteger(count.remindedCount)||count.remindedCount<0||count.remindedCount>count.createdCount||!(count.confirmedAt===null||validDate(count.confirmedAt)))fail();
   return data;
 }
 export function decodeBackup(data){

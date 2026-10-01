@@ -39,11 +39,11 @@ function updateCount(){$('count').textContent=`${data.memos.filter(m=>!m.deleted
 function renderTags(){
   const quick=[...data.tags].filter(t=>t.quick).sort((a,b)=>a.quickOrder-b.quickOrder);
   $('quickTags').replaceChildren();
-  for(const tag of quick){const button=document.createElement('button');button.className='chip'+(current.tagIds.includes(tag.id)?' selected':'');button.textContent=tag.name;button.setAttribute('aria-pressed',current.tagIds.includes(tag.id));button.onclick=guard(()=>toggleTag(tag.id));$('quickTags').append(button);}
+  for(const tag of quick){const button=document.createElement('button');button.className='chip'+(current.tagIds.includes(tag.id)?' selected':'');button.textContent=tag.name;button.setAttribute('aria-pressed',current.tagIds.includes(tag.id));button.onpointerdown=e=>e.preventDefault();button.onclick=guard(()=>toggleTag(tag.id));$('quickTags').append(button);}
   if(!quick.length){const p=document.createElement('span');p.className='muted';p.textContent='設定でよく使うタグを追加できます';$('quickTags').append(p);}
   $('selectedTags').textContent=getTags(current.tagIds).map(t=>'#'+t.name).join('  ');
 }
-function toggleTag(id){current.tagIds=current.tagIds.includes(id)?current.tagIds.filter(x=>x!==id):[...current.tagIds,id];config.selectedTagIds=[...current.tagIds];markChanged();renderTags();}
+function toggleTag(id){current.tagIds=current.tagIds.includes(id)?current.tagIds.filter(x=>x!==id):[...current.tagIds,id];config.selectedTagIds=[...current.tagIds];markChanged();renderTags();$('body').focus({preventScroll:true});}
 function renderImages(){
   for(const url of urls)URL.revokeObjectURL(url);urls=[];$('images').replaceChildren();
   for(const id of current.attachmentIds){const image=data.attachments.find(a=>a.id===id);if(!image)continue;const url=URL.createObjectURL(image.blob);urls.push(url);const tile=document.createElement('div');tile.className='image-tile';const img=document.createElement('img');img.src=url;img.alt=image.fileName;img.tabIndex=0;img.onclick=()=>showImage(image);img.onkeydown=e=>{if(e.key==='Enter')showImage(image);};const remove=document.createElement('button');remove.textContent='画像を削除';remove.onclick=guard(async()=>{await flush();confirmDialog('画像を削除しますか？','Undoで戻せます。メモ本文は残ります。',guard(async()=>{current.attachmentIds=current.attachmentIds.filter(x=>x!==id);markChanged();renderImages();await flush();}));});tile.append(img,remove);$('images').append(tile);}
@@ -52,7 +52,7 @@ function showImage(image){const url=URL.createObjectURL(image.blob);dialog('<h2>
 function renderEditor(){ $('body').value=current.body;$('editorLabel').textContent=data.memos.some(m=>m.id===current.id)?'EDIT MEMO':'NEW MEMO';renderTags();renderImages();resized();historyButtons();}
 async function changeView(nextView){await flush();view=nextView;for(const el of document.querySelectorAll('.view'))el.hidden=el.id!==view;for(const el of document.querySelectorAll('nav button'))el.classList.toggle('active',el.dataset.view===view);if(view==='list')renderList();if(view==='settings'){renderSettings();await storageInfo();}if(view==='write'){resized();$('body').focus({preventScroll:true});}}
 function dialog(html){$('dialogContent').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();}
-function closeDialog(){$('dialog').close();}
+function closeDialog(){$('dialog').close();if(view==='write')$('body').focus({preventScroll:true});}
 function confirmDialog(heading,text,action){dialog(`<h2>${escape(heading)}</h2><p>${escape(text)}</p><button id="confirmAction" class="primary">実行する</button>`);$('confirmAction').onclick=async()=>{const button=$('confirmAction');button.disabled=true;await action();closeDialog();};}
 function tagDialog(heading,ids,apply,{mode='set',extra=''}={}){
   const choices=new Set(ids);dialog(`<h2>${escape(heading)}</h2>${extra}<div id="tagChoices" class="chips"></div><button id="applyTags" class="primary">適用</button>`);
@@ -125,7 +125,7 @@ async function importFile(event){const file=event.target.files[0];event.target.v
   if(mode==='replace'){
     $('beforeBackup').onclick=guard(async()=>{const snapshot=await canonicalSnapshot();download(await exportData(snapshot),'flash-memo-before-import');beforeReady=true;toast('置換前バックアップのダウンロードを開始しました');$('commitImport').disabled=!$('beforeConfirm').checked;});$('beforeConfirm').onchange=()=>{$('commitImport').disabled=!beforeReady||!$('beforeConfirm').checked;};
   }
-  $('commitImport').onclick=guard(async()=>{const button=$('commitImport');button.disabled=true;try{const existing=await canonicalSnapshot();const result=mode==='replace'?incoming:combineBackup(existing,incoming);await enqueue(()=>write(result,mode==='replace'));await syncData();const draft=data.memos.find(m=>m.id===config.activeDraftId&&!m.deletedAt);current=draft?structuredClone(draft):blank(config.selectedTagIds);config.activeDraftId=current.id;revision++;history.reset(stateOf(current));selected.clear();tagSelection.clear();filters=[];renderEditor();renderSettings();closeDialog();$('importResult').textContent=`インポート完了 · 現在のメモ：${data.memos.length}件 / タグ：${data.tags.length}件 / 画像：${data.attachments.length}件`;toast('インポート完了');}finally{button.disabled=false;}});
+  $('commitImport').onclick=guard(async()=>{const button=$('commitImport');button.disabled=true;try{const existing=await canonicalSnapshot();const result=mode==='replace'?incoming:combineBackup(existing,incoming);await enqueue(()=>write(result,mode==='replace'));await syncData();const draft=data.memos.find(m=>m.id===config.activeDraftId&&!m.deletedAt);current=draft?structuredClone(draft):blank(config.selectedTagIds);config.activeDraftId=current.id;revision++;history.reset(stateOf(current));selected.clear();tagSelection.clear();filters=[];pendingExport=null;$('exportResult').textContent='';$('reminder').hidden=true;renderEditor();renderSettings();closeDialog();$('importResult').textContent=`インポート完了 · 現在のメモ：${data.memos.length}件 / タグ：${data.tags.length}件 / 画像：${data.attachments.length}件`;toast('インポート完了');}finally{button.disabled=false;}});
 }
 async function storageInfo(){
   if(navigator.storage?.persisted){$('persistence').textContent='永続ストレージ：'+(await navigator.storage.persisted()?'有効':'未許可');}else $('persistence').textContent='永続ストレージ：非対応';
@@ -137,6 +137,7 @@ function bind(){
   for(const button of document.querySelectorAll('nav button'))button.onclick=guard(()=>changeView(button.dataset.view));
   document.querySelector('.brand').onclick=guard(e=>{e.preventDefault();return changeView('write');});
   $('next').onpointerdown=e=>e.preventDefault();$('next').onclick=guard(nextMemo);
+  for(const id of ['undo','redo','copyCurrent'])$(id).onpointerdown=e=>e.preventDefault();
   $('allTags').onclick=guard(()=>tagDialog('メモのタグ',current.tagIds,async ids=>{current.tagIds=ids;config.selectedTagIds=[...ids];markChanged();renderTags();await flush();}));
   $('undo').onclick=guard(()=>{Object.assign(current,history.undo());current.tagIds=current.tagIds.filter(id=>data.tags.some(t=>t.id===id));config.selectedTagIds=[...current.tagIds];markChanged(false);renderEditor();});
   $('redo').onclick=guard(()=>{Object.assign(current,history.redo());config.selectedTagIds=[...current.tagIds];markChanged(false);renderEditor();});
