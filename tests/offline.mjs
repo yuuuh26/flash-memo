@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFile,access} from 'node:fs/promises';
+const root='https://yuuuh26.github.io/flash-memo/';const handlers={};const cache=new Map();const deleted=[];let claimed=false;
+const caches={open:async()=>({addAll:async requests=>{for(const r of requests){assert.equal(r.cache,'reload');await access(new URL('../'+new URL(r.url).pathname.split('/flash-memo/')[1].replace(/^$/,'index.html'),import.meta.url));cache.set(r.url,new Response('cached '+r.url));}}}),keys:async()=>['flash-memo-shell-old','another-app-cache','flash-memo-shell-v1.0.0-r3'],delete:async name=>{deleted.push(name);},match:async request=>cache.get(typeof request==='string'?request:request.url)};
+vm.runInNewContext(await readFile(new URL('../sw.js',import.meta.url),'utf8'),{URL,Request,caches,fetch:async()=>{throw Error('offline');},self:{location:new URL(root+'sw.js'),clients:{claim:async()=>claimed=true},addEventListener:(name,handler)=>handlers[name]=handler}});
+let pending;handlers.install({waitUntil:p=>pending=p});await pending;assert.equal(cache.size,11);console.log('PASS オフライン資産一覧と更新時のHTTPキャッシュ回避');
+handlers.activate({waitUntil:p=>pending=p});await pending;assert.deepEqual(deleted,['flash-memo-shell-old']);assert.equal(claimed,true);console.log('PASS 他アプリのキャッシュを維持');
+let response;handlers.fetch({request:new Request(root+'js/app.js'),respondWith:p=>response=p});assert.match(await(await response).text(),/cached/);console.log('PASS 通信断でキャッシュ資産を返す');
+const request=new Request(root+'unknown');Object.defineProperty(request,'mode',{value:'navigate'});handlers.fetch({request,respondWith:p=>response=p});assert.match(await(await response).text(),/index.html/);console.log('PASS 通信断のナビゲーションで画面を復元');
+response=null;handlers.fetch({request:new Request(root,{method:'POST',body:'test'}),respondWith:p=>response=p});assert.equal(response,null);console.log('PASS アプリ外への送信をService Workerで作らない');
+response=null;handlers.fetch({request:new Request('https://example.test/'),respondWith:p=>response=p});assert.equal(response,null);console.log('PASS 別オリジンのリクエストを変更しない');
